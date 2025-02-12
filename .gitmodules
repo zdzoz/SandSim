@@ -1,0 +1,6 @@
+[submodule "thirdparty/cimgui"]
+	path = thirdparty/cimgui
+	url = https://github.com/cimgui/cimgui.git
+[submodule "tools/sokol-tools-bin"]
+	path = tools/sokol-tools-bin
+	url = https://github.com/floooh/sokol-tools-bin.git
