@@ -1,2 +1,3 @@
 add_subdirectory(sokol EXCLUDE_FROM_ALL)
 add_subdirectory(cimgui EXCLUDE_FROM_ALL)
+add_subdirectory(cglm EXCLUDE_FROM_ALL)
