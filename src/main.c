@@ -1,6 +1,8 @@
 #include <stdio.h>
 
 #include <inttypes.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include <sokol_app.h>
 #include <sokol_gfx.h>
@@ -23,7 +25,8 @@
 #define VSYNC true
 #define CLEAR_COLOR 0.11f, 0.11f, 0.11f, 1.0f
 
-#define TILE_SIZE 5
+#define TILE_SIZE 4
+#define DEFAULT_BRUSH_RADIUS 3
 
 #define DELTA_TIME sapp_frame_duration()
 
@@ -49,11 +52,12 @@ typedef struct {
 // clang-format on
 
 // enum, color
-#define PARTICLE_ENUM                \
-    X(PARTICLE_NONE = 0, 0x00000000) \
-    X(PARTICLE_SAND, 0xf7dba7ff)     \
-    X(PARTICLE_AIR, 0x48beffff)      \
-    X(PARTICLE_WATER, 0x1ca3ecff)    \
+#define PARTICLE_ENUM             \
+    X(PARTICLE_NONE, 0x00000000)  \
+    X(PARTICLE_AIR, 0x48beffff)   \
+    X(PARTICLE_SAND, 0xf7dba7ff)  \
+    X(PARTICLE_WOOD, 0xa1662fff)  \
+    X(PARTICLE_WATER, 0x1ca3ecff) \
     X(PARTICLE_MAX, 0x00000000)
 
 // X(PARTICLE_SAND, 0xf6d7b0ff)
@@ -65,6 +69,15 @@ typedef struct {
 typedef enum {
     PARTICLE_ENUM
 } particle_t;
+#undef X
+#define X(enum_item, _) #enum_item,
+const char* particle_get_name(particle_t particle)
+{
+    static const char* names[] = {
+        PARTICLE_ENUM
+    };
+    return names[particle];
+}
 #undef X
 #define X(_, color) RGBA_TO_ABGR(color),
 uint32_t particle_get_color(particle_t e_particle)
@@ -78,6 +91,23 @@ uint32_t particle_get_color(particle_t e_particle)
 
 struct game_state_t {
     grid_t grid;
+    struct {
+        int radius;
+        particle_t element;
+    } brush;
+    struct {
+        enum {
+            MOUSE_NONE,
+            MOUSE_LEFT,
+            MOUSE_RIGHT,
+        } held;
+        struct {
+            float x, y;
+        } pos;
+        struct {
+            float x, y;
+        } scroll;
+    } mouse_info;
 } game_state;
 
 void make_grid(grid_t* grid, int tile_size)
@@ -96,6 +126,11 @@ void setup_game(void)
     for (int i = 0; i < game_state.grid.count; i++) {
         game_state.grid.data[i] = PARTICLE_AIR;
     }
+    game_state.brush.radius = DEFAULT_BRUSH_RADIUS;
+    game_state.brush.element = PARTICLE_SAND;
+    game_state.mouse_info.held = MOUSE_NONE;
+    game_state.mouse_info.pos.x = 0.0f;
+    game_state.mouse_info.pos.y = 0.0f;
 }
 
 particle_t get_tile(int x, int y)
@@ -112,10 +147,21 @@ void set_tile(int x, int y, particle_t particle)
     game_state.grid.data[x + y * game_state.grid.width] = particle;
 }
 
+void set_tile_safe(int x, int y, particle_t particle)
+{
+    if (get_tile(x, y) == PARTICLE_AIR) {
+        set_tile(x, y, particle);
+    }
+}
+
+void erase_tile(int x, int y)
+{
+    set_tile(x, y, PARTICLE_AIR);
+}
+
 // converts from window to grid
 void set_tile_from_window(int x, int y, particle_t particle)
 {
-    // TODO: add out of bounds checks
     x = x / game_state.grid.tile_size;
     y = y / game_state.grid.tile_size;
     set_tile(x, y, particle);
@@ -125,6 +171,65 @@ bool is_empty(int x, int y)
 {
     particle_t tile = get_tile(x, y);
     return tile == PARTICLE_AIR;
+}
+
+void draw_horizontal_line(int x1, int x2, int y, particle_t particle)
+{
+    for (int x = x1; x <= x2; x++) {
+        if (rand() % 100 < 25) {
+            if (particle == PARTICLE_AIR) {
+                erase_tile(x, y);
+            } else {
+                set_tile_safe(x, y, particle);
+            }
+        }
+    }
+}
+
+// filled circle
+void draw_circle(int xc, int yc, int r, particle_t particle)
+{
+    xc = xc / game_state.grid.tile_size;
+    yc = yc / game_state.grid.tile_size;
+    r--;
+    int x = 0, y = r;
+    int d = 1 - r; // Initial decision parameter
+
+    while (x <= y) {
+        draw_horizontal_line(xc - x, xc + x, yc + y, particle);
+        draw_horizontal_line(xc - x, xc + x, yc - y, particle);
+        draw_horizontal_line(xc - y, xc + y, yc + x, particle);
+        draw_horizontal_line(xc - y, xc + y, yc - x, particle);
+
+        // Midpoint decision
+        if (d < 0) {
+            d += 2 * x + 3;
+        } else {
+            d += 2 * (x - y) + 5;
+            y--;
+        }
+        x++;
+    }
+}
+
+void update_particle(int x, int y)
+{
+    if (get_tile(x, y) == PARTICLE_SAND) {
+        particle_t below = get_tile(x, y + 1);
+        particle_t left = get_tile(x - 1, y + 1);
+        particle_t right = get_tile(x + 1, y + 1);
+
+        if (is_empty(x, y + 1)) {
+            set_tile(x, y, below);
+            set_tile(x, y + 1, PARTICLE_SAND);
+        } else if (is_empty(x - 1, y + 1)) {
+            set_tile(x, y, left);
+            set_tile(x - 1, y + 1, PARTICLE_SAND);
+        } else if (is_empty(x + 1, y + 1)) {
+            set_tile(x, y, right);
+            set_tile(x + 1, y + 1, PARTICLE_SAND);
+        }
+    }
 }
 
 // :RENDERING
@@ -173,13 +278,11 @@ void make_grid_pipeline(GridRenderState* pip)
         .data = SG_RANGE(indices),
     });
 
-    // grid_state.instance = sg_make_buffer(&(sg_buffer_desc) {
     pip->instance = sg_make_buffer(&(sg_buffer_desc) {
         .size = sizeof(grid_render_state.instance_data),
         .usage = SG_USAGE_STREAM,
     });
 
-    // grid_state.pipeline = sg_make_pipeline(&(sg_pipeline_desc) {
     pip->pipeline = sg_make_pipeline(&(sg_pipeline_desc) {
         .shader = sg_make_shader(grid_shader_desc(sg_query_backend())),
         .index_type = SG_INDEXTYPE_UINT16,
@@ -280,26 +383,15 @@ void update_pixels(sg_buffer* buf)
 
 // :EVENT
 
-static enum {
-    MOUSE_NONE,
-    MOUSE_LEFT,
-    MOUSE_RIGHT,
-
-} mouse_held;
-
-static struct {
-    float x, y;
-} mouse_pos;
-
 void event_mouseup(const sapp_event* e)
 {
     // LEFT
     if (e->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
-        mouse_held = MOUSE_NONE;
+        game_state.mouse_info.held = MOUSE_NONE;
     }
     // RIGHT
     if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
-        mouse_held = MOUSE_NONE;
+        game_state.mouse_info.held = MOUSE_NONE;
     }
     // MIDDLE
     if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
@@ -310,17 +402,35 @@ void event_mousedown(const sapp_event* e)
 {
     // LEFT
     if (e->mouse_button == SAPP_MOUSEBUTTON_LEFT) {
-        mouse_held = MOUSE_LEFT;
-        set_tile_from_window(e->mouse_x, e->mouse_y, PARTICLE_SAND);
+        game_state.mouse_info.held = MOUSE_LEFT;
     }
     // RIGHT
     if (e->mouse_button == SAPP_MOUSEBUTTON_RIGHT) {
-        if (mouse_held == MOUSE_NONE)
-            mouse_held = MOUSE_RIGHT;
-        set_tile_from_window(e->mouse_x, e->mouse_y, PARTICLE_AIR);
+        if (game_state.mouse_info.held == MOUSE_NONE)
+            game_state.mouse_info.held = MOUSE_RIGHT;
     }
     // MIDDLE
     if (e->mouse_button == SAPP_MOUSEBUTTON_MIDDLE) {
+    }
+}
+
+void event_keydown(const sapp_event* e)
+{
+    switch (e->key_code) {
+    case SAPP_KEYCODE_Q:
+        sapp_request_quit();
+        break;
+    case SAPP_KEYCODE_1:
+        game_state.brush.element = PARTICLE_SAND;
+        break;
+    case SAPP_KEYCODE_2:
+        game_state.brush.element = PARTICLE_WOOD;
+        break;
+    case SAPP_KEYCODE_3:
+        game_state.brush.element = PARTICLE_WATER;
+        break;
+    default:
+        break;
     }
 }
 
@@ -339,25 +449,11 @@ void init(void)
 // TODO: move to another thread, to make consistent
 void fixed_update(void)
 {
-    for (int i = game_state.grid.count - 1; i >= 0; i--) {
-        int x = i % game_state.grid.width;
-        int y = i / game_state.grid.width;
-
-        if (get_tile(x, y) == PARTICLE_SAND) {
-            particle_t below = get_tile(x, y + 1);
-            particle_t left = get_tile(x - 1, y + 1);
-            particle_t right = get_tile(x + 1, y + 1);
-
-            if (is_empty(x, y + 1)) {
-                set_tile(x, y, below);
-                set_tile(x, y + 1, PARTICLE_SAND);
-            } else if (is_empty(x - 1, y + 1)) {
-                set_tile(x, y, left);
-                set_tile(x - 1, y + 1, PARTICLE_SAND);
-            } else if (is_empty(x + 1, y + 1)) {
-                set_tile(x, y, right);
-                set_tile(x + 1, y + 1, PARTICLE_SAND);
-            }
+    for (int y = game_state.grid.height - 1; y >= 0; y--) {
+        bool left_to_right = rand() % 100 > 50;
+        for (int i = 0; i < game_state.grid.width; i++) {
+            int x = left_to_right ? i : game_state.grid.width - 1 - i;
+            update_particle(x, y);
         }
     }
 }
@@ -371,12 +467,12 @@ void update(void)
         current = 0.0;
     }
     current += DELTA_TIME * 1000.0;
-    if (mouse_held == MOUSE_LEFT) {
-        set_tile_from_window(mouse_pos.x, mouse_pos.y, PARTICLE_SAND);
+    if (game_state.mouse_info.held == MOUSE_LEFT) {
+        draw_circle(game_state.mouse_info.pos.x, game_state.mouse_info.pos.y, game_state.brush.radius, game_state.brush.element);
     }
 
-    if (mouse_held == MOUSE_RIGHT) {
-        set_tile_from_window(mouse_pos.x, mouse_pos.y, PARTICLE_AIR);
+    if (game_state.mouse_info.held == MOUSE_RIGHT) {
+        draw_circle(game_state.mouse_info.pos.x, game_state.mouse_info.pos.y, game_state.brush.radius, PARTICLE_AIR);
     }
     render();
 }
@@ -388,13 +484,11 @@ void event(const sapp_event* e)
     case SAPP_EVENTTYPE_KEY_UP:
         break;
     case SAPP_EVENTTYPE_KEY_DOWN:
-        if (e->key_code == SAPP_KEYCODE_Q) {
-            sapp_request_quit();
-        }
+        event_keydown(e);
         break;
     case SAPP_EVENTTYPE_MOUSE_MOVE:
-        mouse_pos.x = e->mouse_x;
-        mouse_pos.y = e->mouse_y;
+        game_state.mouse_info.pos.x = e->mouse_x;
+        game_state.mouse_info.pos.y = e->mouse_y;
         break;
     case SAPP_EVENTTYPE_MOUSE_ENTER:
         break;
@@ -406,8 +500,17 @@ void event(const sapp_event* e)
     case SAPP_EVENTTYPE_MOUSE_DOWN:
         event_mousedown(e);
         break;
-    case SAPP_EVENTTYPE_MOUSE_SCROLL:
-        break;
+    case SAPP_EVENTTYPE_MOUSE_SCROLL: {
+        game_state.mouse_info.scroll.y = e->scroll_y;
+        if (game_state.mouse_info.scroll.y > 0.1) {
+            game_state.brush.radius++;
+        }
+        if (game_state.mouse_info.scroll.y < -0.1) {
+            game_state.brush.radius--;
+        }
+        if (game_state.brush.radius < 1)
+            game_state.brush.radius = 1;
+    } break;
     default:
         fprintf(stderr, "Unknown event type: %d\n", e->type);
     }
@@ -451,21 +554,22 @@ void debug_ui(void)
     igSetNextWindowPos((ImVec2) { 10, 10 }, ImGuiCond_Once, (ImVec2) { 0, 0 });
     igBegin("Debug", 0, ImGuiWindowFlags_AlwaysAutoResize);
     igText("FPS: %.2lf", (1.0 / DELTA_TIME));
-    igText("Game State:");
-    igText("  Grid (WxH): %dx%d", game_state.grid.width, game_state.grid.height);
-    ImVec2 mouse_pos = { .x = 0.0f, .y = 0.0f };
-    igGetMousePos(&mouse_pos);
-    if (igIsMousePosValid(&mouse_pos)) {
-        igText("Mouse: (%.2f, %.2f)", mouse_pos.x, mouse_pos.y);
-    } else {
-        igText("Mouse: (0.0, 0.0)");
-    }
+    igText("Grid (WxH): %dx%d", game_state.grid.width, game_state.grid.height);
+    igText("Mouse:");
+    igText(" Pos: (%.2f, %.2f)", game_state.mouse_info.pos.x, game_state.mouse_info.pos.y);
     const char* held = "NONE";
-    if (mouse_held == MOUSE_LEFT) {
+    if (game_state.mouse_info.held == MOUSE_LEFT) {
         held = "LEFT";
-    } else if (mouse_held == MOUSE_RIGHT) {
+    } else if (game_state.mouse_info.held == MOUSE_RIGHT) {
         held = "RIGHT";
     }
-    igText("Mouse Held: %s\n", held);
+    igText(" Held: %s", held);
+    igText(" Scroll: %f", game_state.mouse_info.scroll.y);
+    igSpacing();
+    igSeparator();
+    igSpacing();
+    igText("Brush:");
+    igText(" element: %s", particle_get_name(game_state.brush.element));
+    igText(" radius: %d", game_state.brush.radius);
     igEnd();
 }
