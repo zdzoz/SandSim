@@ -19,7 +19,7 @@
 
 // :Application Settings
 
-#define APPLICATION_NAME "Bouncy"
+#define APPLICATION_NAME "Simulation"
 #define WIDTH 1600
 #define HEIGHT 1000
 #define VSYNC true

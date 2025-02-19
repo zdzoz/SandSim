@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
-project(Bouncy LANGUAGES C)
+project(SandSim LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
