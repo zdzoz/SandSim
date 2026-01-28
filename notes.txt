@@ -1,0 +1,17 @@
+CURRENT
+
+- acceleration
+- water
+
+BACKLOG
+
+- fix resizing
+- hover showing current particle
+- implement
+    - wet sand
+    - dirt
+    - mud
+    - steam
+    - smoke
+    - wood
+    - fire
